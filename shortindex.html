@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High Funding Rates - Above SMA</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #ffffff;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #ffffff;
+            font-size: 28px;
+        }
+
+        .loading {
+            text-align: center;
+            font-size: 18px;
+            color: #888;
+            padding: 40px;
+        }
+
+        .error {
+            text-align: center;
+            font-size: 18px;
+            color: #ff6b6b;
+            padding: 40px;
+        }
+
+        .pairs-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .pair-item {
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 12px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            transition: background 0.2s;
+        }
+
+        .pair-item:hover {
+            background: #252525;
+        }
+
+        .pair-symbol {
+            font-size: 18px;
+            font-weight: bold;
+            color: #ffffff;
+            min-width: 120px;
+        }
+
+        .pair-funding {
+            display: flex;
+            flex-direction: column;
+            min-width: 100px;
+            gap: 2px;
+            align-items: center;
+        }
+
+        .funding-rate {
+            font-size: 14px;
+            font-weight: bold;
+            color: #00ff88;
+        }
+
+        .funding-volume {
+            font-size: 14px;
+            font-weight: bold;
+            color: #00ff88;
+        }
+
+        .pair-percent {
+            font-size: 14px;
+            font-weight: bold;
+            color: #00ff88;
+            min-width: 80px;
+        }
+
+        .pair-chart {
+            width: 200px;
+            height: 100px;
+            flex-shrink: 0;
+        }
+
+        .chart-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .chart-label {
+            font-size: 10px;
+            color: #666;
+            margin-bottom: 3px;
+        }
+
+        .positive {
+            color: #00ff88;
+        }
+
+        .stats {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            border: 1px solid #333;
+        }
+
+        .stats-item {
+            display: inline-block;
+            margin: 0 15px;
+            font-size: 14px;
+            color: #888;
+        }
+
+        .stats-value {
+            font-weight: bold;
+            color: #ffffff;
+            margin-left: 5px;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div id="content">
+            <div class="loading">Loading pairs...</div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}`;
+
+            console.log('Connecting to WebSocket:', wsUrl);
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function () {
+                console.log('Connected to WebSocket - waiting for data...');
+            };
+
+            ws.onmessage = function (event) {
+                const message = JSON.parse(event.data);
+                console.log('Received message:', message.type);
+
+                if (message.type === 'latestData' || message.type === 'newScan') {
+                    console.log(`Displaying ${message.data.pairs.length} pairs`);
+                    displayPairs(message.data.pairs);
+                }
+            };
+
+            ws.onclose = function () {
+                console.log('WebSocket connection closed - reconnecting in 3 seconds...');
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onerror = function (error) {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        function drawChart(canvas, candles, bbData) {
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+
+            // Clear canvas
+            ctx.fillStyle = '#0a0a0a';
+            ctx.fillRect(0, 0, width, height);
+
+            if (!candles || candles.length === 0) return;
+
+            // Find min/max for scaling
+            let minPrice = Infinity;
+            let maxPrice = -Infinity;
+
+            candles.forEach(candle => {
+                minPrice = Math.min(minPrice, candle.low);
+                maxPrice = Math.max(maxPrice, candle.high);
+            });
+
+            // Add padding
+            const padding = (maxPrice - minPrice) * 0.1;
+            minPrice -= padding;
+            maxPrice += padding;
+
+            const priceRange = maxPrice - minPrice;
+            const candleWidth = width / candles.length;
+
+            // Draw Bollinger Bands
+            if (bbData && bbData.length > 0) {
+                // Upper band
+                ctx.strokeStyle = '#444';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                bbData.forEach((bb, i) => {
+                    const x = i * candleWidth + candleWidth / 2;
+                    const y = height - ((bb.upperBand - minPrice) / priceRange) * height;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+
+                // Middle band (SMA)
+                ctx.strokeStyle = '#666';
+                ctx.beginPath();
+                bbData.forEach((bb, i) => {
+                    const x = i * candleWidth + candleWidth / 2;
+                    const y = height - ((bb.sma - minPrice) / priceRange) * height;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+
+                // Lower band
+                ctx.strokeStyle = '#444';
+                ctx.beginPath();
+                bbData.forEach((bb, i) => {
+                    const x = i * candleWidth + candleWidth / 2;
+                    const y = height - ((bb.lowerBand - minPrice) / priceRange) * height;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+            }
+
+            // Draw candles
+            candles.forEach((candle, i) => {
+                const x = i * candleWidth;
+                const openY = height - ((candle.open - minPrice) / priceRange) * height;
+                const closeY = height - ((candle.close - minPrice) / priceRange) * height;
+                const highY = height - ((candle.high - minPrice) / priceRange) * height;
+                const lowY = height - ((candle.low - minPrice) / priceRange) * height;
+
+                const isGreen = candle.close >= candle.open;
+                ctx.strokeStyle = isGreen ? '#00ff88' : '#ff6b6b';
+                ctx.fillStyle = isGreen ? '#00ff88' : '#ff6b6b';
+
+                // Draw wick
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(x + candleWidth / 2, highY);
+                ctx.lineTo(x + candleWidth / 2, lowY);
+                ctx.stroke();
+
+                // Draw body
+                const bodyHeight = Math.abs(closeY - openY);
+                const bodyY = Math.min(openY, closeY);
+                if (bodyHeight < 1) {
+                    // Doji - draw a line
+                    ctx.beginPath();
+                    ctx.moveTo(x + 1, openY);
+                    ctx.lineTo(x + candleWidth - 1, openY);
+                    ctx.stroke();
+                } else {
+                    ctx.fillRect(x + 1, bodyY, candleWidth - 2, bodyHeight);
+                }
+            });
+        }
+
+        function displayPairs(pairs) {
+            const content = document.getElementById('content');
+
+            if (pairs.length === 0) {
+                content.innerHTML = '<div class="loading">No pairs found with funding rate > 0.00005000</div>';
+                return;
+            }
+
+            // Create pairs list
+            const pairsList = document.createElement('div');
+            pairsList.className = 'pairs-list';
+
+            pairs.forEach(pair => {
+                const pairItem = document.createElement('div');
+                pairItem.className = 'pair-item';
+
+                // 1. Symbol name
+                const symbol = document.createElement('div');
+                symbol.className = 'pair-symbol';
+                symbol.textContent = pair.symbol;
+                pairItem.appendChild(symbol);
+
+                // 2. % Above SMA
+                const percent = document.createElement('div');
+                percent.className = 'pair-percent';
+                percent.textContent = `+${pair.percentAboveMiddle.toFixed(2)}%`;
+                pairItem.appendChild(percent);
+
+                // 3. Funding rate and volume
+                const fundingContainer = document.createElement('div');
+                fundingContainer.className = 'pair-funding';
+
+                const fundingRate = document.createElement('div');
+                fundingRate.className = 'funding-rate';
+                fundingRate.textContent = pair.fundingRate.toFixed(8);
+                fundingContainer.appendChild(fundingRate);
+
+                if (pair.volume24h !== undefined) {
+                    const volume = document.createElement('div');
+                    volume.className = 'funding-volume';
+                    volume.textContent = `${pair.volume24h.toFixed(2)}m`;
+                    fundingContainer.appendChild(volume);
+                }
+
+                pairItem.appendChild(fundingContainer);
+
+                // 4. 1-minute chart
+                if (pair.candles1m && pair.bollingerBands1m) {
+                    const wrapper1m = document.createElement('div');
+                    wrapper1m.className = 'chart-wrapper';
+
+                    const label1m = document.createElement('div');
+                    label1m.className = 'chart-label';
+                    label1m.textContent = '1 Minute';
+                    wrapper1m.appendChild(label1m);
+
+                    const canvas1m = document.createElement('canvas');
+                    canvas1m.className = 'pair-chart';
+                    canvas1m.width = 200;
+                    canvas1m.height = 100;
+                    wrapper1m.appendChild(canvas1m);
+                    drawChart(canvas1m, pair.candles1m, pair.bollingerBands1m);
+
+                    pairItem.appendChild(wrapper1m);
+                }
+
+                // 5. 1-day chart
+                if (pair.candles1d && pair.bollingerBands1d) {
+                    const wrapper1d = document.createElement('div');
+                    wrapper1d.className = 'chart-wrapper';
+
+                    const label1d = document.createElement('div');
+                    label1d.className = 'chart-label';
+                    label1d.textContent = '1 Day';
+                    wrapper1d.appendChild(label1d);
+
+                    const canvas1d = document.createElement('canvas');
+                    canvas1d.className = 'pair-chart';
+                    canvas1d.width = 200;
+                    canvas1d.height = 100;
+                    wrapper1d.appendChild(canvas1d);
+                    drawChart(canvas1d, pair.candles1d, pair.bollingerBands1d);
+
+                    pairItem.appendChild(wrapper1d);
+                }
+
+                pairsList.appendChild(pairItem);
+            });
+
+            content.innerHTML = '';
+            content.appendChild(pairsList);
+        }
+
+        // Connect to WebSocket on page load
+        connectWebSocket();
+    </script>
+</body>
+
+</html>
