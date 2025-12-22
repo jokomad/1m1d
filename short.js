@@ -4,9 +4,49 @@ const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');
 
+// Telegram Configuration
+const TELEGRAM_BOT_TOKEN = '8531770574:AAFaigDKYYIE_QGbr_LIGwWzT-jpEJ1STBc'; // Replace with your bot token
+const TELEGRAM_CHAT_ID = '-1003583931439';     // Replace with your chat ID
+
 // Store latest scan result
 let latestScanResult = null;
 let wss = null;
+
+// Function to send Telegram message
+function sendTelegramMessage(message) {
+    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID || TELEGRAM_BOT_TOKEN === 'YOUR_BOT_TOKEN') {
+        return;
+    }
+
+    const postData = JSON.stringify({
+        chat_id: TELEGRAM_CHAT_ID,
+        text: message,
+        parse_mode: 'HTML'
+    });
+
+    const options = {
+        hostname: 'api.telegram.org',
+        path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': postData.length
+        }
+    };
+
+    const req = https.request(options, (res) => {
+        if (res.statusCode !== 200) {
+            console.error(`Telegram API Error: ${res.statusCode}`);
+        }
+    });
+
+    req.on('error', (error) => {
+        console.error('Error sending Telegram message:', error.message);
+    });
+
+    req.write(postData);
+    req.end();
+}
 
 // Create HTTP server for serving the webpage
 const server = http.createServer((req, res) => {
@@ -351,10 +391,25 @@ async function runScanAndBroadcast() {
         // Broadcast to all connected WebSocket clients
         broadcastScanResult(scanResult);
 
+        // Check for pairs above 5% SMA and send Telegram alert
+        const highVolPairs = pairs.filter(p => p.percentAboveMiddle > 5);
+        if (highVolPairs.length > 0) {
+            let message = '';
+
+            highVolPairs.forEach(p => {
+                message += `${p.symbol} +${p.percentAboveMiddle.toFixed(2)}%\n`;
+            });
+
+            sendTelegramMessage(message);
+        }
+
         const used = process.memoryUsage().heapUsed / 1024 / 1024;
         console.log(`\n${'='.repeat(60)}`);
         console.log(`✅ SCAN COMPLETED AT ${new Date().toLocaleTimeString()}`);
         console.log(`Found ${pairs.length} pairs above SMA`);
+        if (highVolPairs.length > 0) {
+            console.log(`⚠️  SENT TELEGRAM ALERT FOR ${highVolPairs.length} PAIRS (>5%)`);
+        }
         console.log(`Memory usage: ${Math.round(used * 100) / 100} MB`);
         console.log(`${'='.repeat(60)}\n`);
     } catch (error) {
