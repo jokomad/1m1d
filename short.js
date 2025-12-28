@@ -399,7 +399,7 @@ async function runScanAndBroadcast() {
 
             highVolPairs.forEach(p => {
                 // Telegram doesn't support custom colors, using 🟢 emoji instead
-                message += `🟢 ${time} - <b>${p.symbol}</b> +${p.percentAboveMiddle.toFixed(2)}% - ${p.currentPrice} USDT\n`;
+                message += `🟢 ${time} - ${p.symbol} +${p.percentAboveMiddle.toFixed(2)}% - ${p.currentPrice} USDT\n`;
             });
 
             sendTelegramMessage(message);
@@ -416,6 +416,88 @@ async function runScanAndBroadcast() {
         console.log(`${'='.repeat(60)}\n`);
     } catch (error) {
         console.error('Error during scan:', error);
+    }
+
+    // Run secondary scan for low funding drops
+    await scanForLowFundingDrops();
+}
+
+// Function to scan for Low Funding Rate (< 0.00005) and Price Drop (> 5% below SMA)
+async function scanForLowFundingDrops() {
+    console.log(`\n${'-'.repeat(40)}`);
+    console.log(`🔍 STARTING SECONDARY SCAN (Low Funding & Price Drops)...`);
+
+    try {
+        const allRates = await fetchFundingRates();
+        const lowFundingPairs = allRates.filter(p =>
+            p.symbol.endsWith('USDT') &&
+            parseFloat(p.lastFundingRate) < 0.00005000
+        );
+
+        console.log(`Found ${lowFundingPairs.length} pairs with Low Funding Rate (< 0.00005)`);
+
+        const drops = [];
+        const batchSize = 39; // Safe batch size
+        const delayBetweenBatches = 1100; // ms
+
+        for (let i = 0; i < lowFundingPairs.length; i += batchSize) {
+            const batch = lowFundingPairs.slice(i, i + batchSize);
+
+            const batchPromises = batch.map(async (pair) => {
+                try {
+                    const candles1m = await fetchKlineData(pair.symbol, '1m', 100);
+                    if (!candles1m || candles1m.length < 20) return null;
+
+                    const closes = candles1m.map(c => parseFloat(c[4]));
+                    const bb = calculateBollingerBands(closes, 20, 2);
+                    const currentPrice = parseFloat(candles1m[candles1m.length - 1][4]);
+
+                    if (!bb) return null;
+
+                    // Calculate Percent Above/Below Middle Band (SMA)
+                    // If price is below SMA, this will be specific negative value
+                    // e.g. Price 90, SMA 100 => (90-100)/100 = -0.10 => -10%
+                    const percentAboveMiddle = ((currentPrice - bb.middle) / bb.middle) * 100;
+
+                    // Filter for > 5% Drop (i.e. < -5%)
+                    if (percentAboveMiddle < -5) {
+                        return {
+                            symbol: pair.symbol,
+                            percentAboveMiddle: percentAboveMiddle,
+                            currentPrice: currentPrice
+                        };
+                    }
+                } catch (e) {
+                    return null;
+                }
+            });
+
+            const results = await Promise.all(batchPromises);
+            const validDrops = results.filter(r => r !== null && r !== undefined);
+            drops.push(...validDrops);
+
+            if (i + batchSize < lowFundingPairs.length) {
+                await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
+            }
+        }
+
+        if (drops.length > 0) {
+            let message = '';
+            const time = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+            drops.forEach(p => {
+                message += `🔴 ${time} - ${p.symbol} ${p.percentAboveMiddle.toFixed(2)}% - ${p.currentPrice} USDT\n`;
+            });
+
+            sendTelegramMessage(message);
+            console.log(`⚠️  SENT RED ALERT FOR ${drops.length} PAIRS (<-5%)`);
+        } else {
+            console.log(`No pairs found with > 5% drop below SMA`);
+        }
+        console.log(`${'-'.repeat(40)}\n`);
+
+    } catch (error) {
+        console.error('Error during secondary scan:', error);
     }
 }
 
