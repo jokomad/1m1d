@@ -395,9 +395,11 @@ async function runScanAndBroadcast() {
         const highVolPairs = pairs.filter(p => p.percentAboveMiddle > 5);
         if (highVolPairs.length > 0) {
             let message = '';
+            const time = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
             highVolPairs.forEach(p => {
-                message += `${p.symbol} +${p.percentAboveMiddle.toFixed(2)}%\n`;
+                // Telegram doesn't support custom colors, using 🟢 emoji instead
+                message += `🟢 ${time} - <b>${p.symbol}</b> +${p.percentAboveMiddle.toFixed(2)}% - ${p.currentPrice} USDT\n`;
             });
 
             sendTelegramMessage(message);
