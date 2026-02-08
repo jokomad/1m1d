@@ -5,7 +5,7 @@ const path = require('path');
 const WebSocket = require('ws');
 // Telegram Configuration
 const TELEGRAM_BOT_TOKEN = '8531770574:AAFaigDKYYIE_QGbr_LIGwWzT-jpEJ1STBc'; // Replace with your bot token
-const TELEGRAM_CHAT_ID = '-1003583931439';     // Replace with your chat ID
+const TELEGRAM_CHAT_ID = '-1003583931439-';     // Replace with your chat ID
 // Store latest scan result
 let latestScanResult = null;
 let wss = null;
@@ -415,3 +415,4 @@ server.listen(PORT, () => {
     // Start the automatic scanning
     scheduleMinutelyScans();
 });
+
